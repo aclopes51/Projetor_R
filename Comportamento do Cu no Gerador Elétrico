@@ -1,0 +1,1036 @@
+#                      ⭐   GMM - Método dos Momentos Generalizados
+#                           VAR - Vetor Autoregressivo
+# Obs <- Melhor Modelo até agora
+# Verificar sua versão do R
+R.version.string
+
+install.packages("systemfonts")  # Atualize para a versão mais recente
+
+install.packages("tidyverse")
+install.packages("tidymodels")
+# 👉 Parece que o pacote tidymodels está tentando carregar a dependência lava, mas este pacote
+#    não está instalado no seu sistema
+install.packages("lava")
+install.packages("broom")
+install.packages(c("rsample"))
+install.packages(c("dials", "modeldata", "rsample")) # tidymodel_update
+install.packages("kableExtra")
+install.packages("knitr")
+install.packages("aTSA")
+install.packages("plumber")
+install.packages("httr2")
+install.packages("vars")
+
+library(tidyverse)
+tidyverse_update()
+
+library(tidymodels)
+tidymodels_update()
+
+library(zoo)
+library(car)
+library(lmtest)
+library(nortest)
+library(sandwich)
+library(gmm)
+library(patchwork) # Pacote para combinar gráficos do ggplot
+library(kableExtra)
+library(knitr)
+library(aTSA)
+
+#  (A)                            ♻️ Nova tibble:
+#  ⚠️ Os testes demostram que os erros não ~sao normalizados. Próxima alternativa é remover os 
+#   NA´s por meio de uma outro data.frame
+mkf6 <- tibble(
+  Data = as.Date(c(
+    "08/01/25", "09/01/25", "10/01/25", "13/01/25", "14/01/25", "15/01/25", "16/01/25", 
+    "17/01/25", "21/01/25", "29/01/25", "31/01/25", "31/01/25", "03/02/25", "04/02/25", 
+    "04/02/25", "05/02/25", "05/02/25", "06/02/25", "06/02/25", "07/02/25", "07/02/25", 
+    "10/02/25", "10/02/25", "11/02/25", "11/02/25", "12/02/25", "12/02/25", "13/02/25",
+    "13/02/25", "14/02/25", "14/02/25", "17/02/25", "17/02/25", "18/02/25", "18/02/25",
+    "19/02/25", "19/02/25", "20/02/25", "20/02/25", "21/02/25", "21/02/25", "25/02/25",
+    "27/02/25", "25/04/25", "29/04/25", "01/05/25", "09/05/25", "12/05/25", "14/05/25", 
+    "19/05/25", "22/05/25", "24/05/25", "26/05/25", "29/05/25", "02/06/25", "02/06/25",
+    "03/06/25", "06/06/25", "07/06/25", "09/06/25", '11/06/25', "12/06/25", "14/06/25",
+    "15/06/25", "16/06/25", "17/06/25", "17/06/25", "18/06/25", "18/06/25", "19/06/25", 
+    "20/06/25", "21/06/25", "22/06/25", "22/06/25"), format = "%d/%m/%y"), 
+  
+  Cu_MKF80 = c(
+    55.2, 69.6, 72.2, 87.3, 75.7, 79.8, 73.8, 80.2, 88.2, 95.0, 86.2, 86.2, 51.6, 69.9, 
+    65.1, 71.5, 63.2, 60.6, 54.3, 37.6, 33.1, 48.3, 30.8, 41.4, 36.4, 25.2, 23.2, 21.0, 
+    22.9, 16.4, 17.4, 17.3, 17.9, 15.7, 17.6, 13.1, 16.4, 19.5, 16.5, 14.8, 15.2, 3.20, 
+    2.00, 10.5, 17.5, 2.40, 7.00, 10.4, 24.8, 23.1, 22.9, 14.3, 16.9, 23.3, 16.1, 14.7, 
+    13.9, 13.4, 12.5, 13.2, 17.8, 15.3, 8.50, 10.8, 10.8, 11.2, 11.3, 11.0, 11.1, 10.9, 
+    12.4, 14.2, 16.3, 16.3), 
+  # -> o valor de 3.2 do cobre ...troca
+  # Cu_MKF66 = c(),
+  O2_80 = c(
+    7.90, 8.30, 6.90, 9.00, 11.5, 10.5, 10.8, 9.20, 7.50, 7.00, 13.3, 13.0, 9.60, 8.30, 
+    10.7, 8.30, 9.90, 7.60, 11.4, 6.30, 7.90, 6.70, 10.3, 9.00, 10.7, 9.30, 13.3, 9.00,
+    10.1, 9.00, 10.9, 6.70, 11.0, 6.50, 8.80, 7.60, 21.2, 6.40, 19.9, 6.40, 14.2, 70.6,
+    3.50, 17.5, 15.6, 18.8, 15.6, 16.2, 16.5, 17.9, 15.0, 25.4, 19.0, 16.8, 20.0, 25.9,
+    22.0, 24.7, 9.60, 17.5, 18.5, 20.4, 17.1, 17.7, 18.2, 17.6, 23.6, 18.2, 19.5, 18.8,
+    15.4, 16.5, 17.9, 17.3),
+  # Nos valores de TOC sem leitura (27/02 - 25/4), foi utilizada SEQUÊNCIA DE NÚMEROS aleatória.
+  TOC_80 = c(
+    4772, 4153, 4124, 4151, 3897, 3879, 3845, 3886, 3611, 3483, 3283, 2699, 2310, 2316,
+    2316, 2168, 1816, 1826, 1455, 1474, 1279, 1281, 1064, 1051, 805 , 864 , 672 , 694 ,
+    611 , 428 , 566 , 633 , 543 , 559 , 502 , 507 , 449 , 485 , 428 , 465 , 409 , 392 ,
+    410 , 586 , 624 , 537 , 520 , 543 , 575 , 569 , 613 , 549 , 567 , 550 , 513 , 487 ,
+    427 , 289 , 322 , 312 , 409 , 414 , 327 , 332 , 325 , 378 , 338 , 360 , 324 , 329 ,
+    350 , 374 , 386 , 412))
+
+# 💯  Gráfico das três variáveis juntas:
+#----
+ggplot(mkf6, aes(x = Data)) +
+  # O₂
+  geom_smooth(aes(y = O2_80, color = "O2", linetype = "O2"), 
+              method = "loess", se = FALSE, size = 0.6) +
+  geom_point(aes(y = O2_80, color = "O2", shape = "O2"), size = 2.5) +
+  
+  # Cu
+  geom_smooth(aes(y = Cu_MKF80, color = "Cu", linetype = "Cu"), 
+              method = "loess", se = FALSE, size = 0.6) +
+  geom_point(aes(y = Cu_MKF80, color = "Cu", shape = "Cu"), size = 2.5) +
+  
+  # TOC
+  geom_smooth(aes(y = TOC_80/50, color = "TOC", linetype = "TOC"), 
+              method = "loess", se = FALSE, size = 0.6) +
+  geom_point(aes(y = TOC_80/50, color = "TOC", shape = "TOC"), size = 2.5) +
+  
+  # Destacar o início do Feed and Bleed com água de Angra1 (31/01/25):
+  # Como há duas entradas para 31/01, vamos usar a primeira
+  geom_point(data = mkf6 %>% 
+               filter(Data == as.Date("2025-01-31")) %>% 
+               slice(1),  # Pega apenas a primeira entrada
+             aes(y = TOC_80/50), color = "gray1", size = 6, shape = 10) +
+  
+  # Adicionar texto:
+  geom_text(data = mkf6 %>% 
+              filter(Data == as.Date("2025-01-31")) %>% 
+              slice(1),
+            aes(y = TOC_80/50, label = paste( TOC_80, "ppb\n (F&B)")),
+            vjust = 1.4, hjust = 0.55, color = "gray", size = 3.5, fontface = "bold") +
+  
+  # Ponto destacado do COBRE em 30/01 (8 trocas de resina)
+  geom_point(data = mkf6[10, ], aes(y = Cu_MKF80), color = "gray1", size = 5, shape = 10) +
+  geom_text(data = mkf6[10, ], aes(y = Cu_MKF80, label = paste( Cu_MKF80, "ppb\n8º troca das resinas")),
+            vjust = 1.4, hjust = 0.5, color = "gray", size = 3, fontface = "bold") +
+  
+  
+  # NOVA ANOTAÇÃO: 1º Remoção da trilha em 13/03 - SETA E TEXTO
+  geom_segment(x = as.Date("2025-03-13"), xend = as.Date("2025-03-13"),
+               y = mean(c(max(mkf6$O2_80, na.rm = TRUE), min(mkf6$O2_80, na.rm = TRUE))),
+               yend = mean(c(max(mkf6$O2_80, na.rm = TRUE), min(mkf6$O2_80, na.rm = TRUE))) * 0.9,
+               arrow = arrow(length = unit(0.2, "cm"), type = "closed"), 
+               color = "#F1B6DA", size = 0.1) +
+  
+  geom_label(x = as.Date("2025-03-13"), 
+             y = mean(c(max(mkf6$O2_80, na.rm = TRUE), min(mkf6$O2_80, na.rm = TRUE))) * 1.15,
+             label = "1º Remoção\nda trilha\n(13/03)", 
+             color = "#A8A8A8", fill = "#F7F7F7", size = 3.5, fontface = "bold") +
+  
+  # Despolarização: 21/04 e 27/04
+  geom_segment(x = as.Date("2025-04-24"), xend = as.Date("2025-04-24"),
+               y = mean(c(max(mkf6$O2_80, na.rm = TRUE), min(mkf6$O2_80, na.rm = TRUE))),
+               yend = mean(c(max(mkf6$O2_80, na.rm = TRUE), min(mkf6$O2_80, na.rm = TRUE))) * 0.9,
+               arrow = arrow(length = unit(0.2, "cm"), type = "closed"),
+               color = "#F1B6DA", size = 0.01) +
+  
+  geom_label(x = as.Date("2025-04-24"),
+             y = mean(c(max(mkf6$O2_80, na.rm = TRUE), min(mkf6$O2_80, na.rm = TRUE))) * 1.15,
+             label = "14º e 15º Remoções \ndas trilhas\n(21 à 27/04",
+             color = "#A8A8A8", fill = "#F7F7F7", size = 3.5, fontface = "bold") +
+  
+  
+  # Escalas
+  scale_y_continuous(
+    name = "O2 e Cu (ppb)",
+    sec.axis = sec_axis(~ . * 50, name = "TOC (ppb)")
+  ) +
+  
+  # UNIFICAR AS LEGENDAS
+  scale_color_manual(
+    name = "Variáveis",
+    values = c("O2" = "blue", "Cu" = "orange2", "TOC" = "darkgreen")
+  ) +
+  
+  scale_shape_manual(
+    name = "Variáveis",
+    values = c("O2" = 17, "Cu" = 16, "TOC" = 15)
+  ) +
+  
+  scale_linetype_manual(
+    name = "Variáveis",
+    values = c("O2" = "solid", "Cu" = "solid", "TOC" = "solid")
+  ) +
+  
+  guides(
+    color = guide_legend(override.aes = list(
+      shape = c(16, 17, 15),
+      linetype = c("solid", "solid", "solid")
+    ))
+  ) +
+  
+  labs(title = "Comportamento do Cobre, Oxigênio e do TOC no período estudado") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+#----
+
+mkf6
+teste_modelo3 <- lm(Cu_MKF80 ~ TOC_80 + O2_80, data = mkf6)
+summary(teste_modelo3)
+par(mfrow = c(2, 2))
+plot(teste_modelo3)
+par(mfrow = c(1,1))
+
+
+
+par(mfrow = c(1, 2))
+acf(teste_modelo3$residuals)
+pacf(teste_modelo3$residuals)
+par(mfrow = c(1,1))
+
+dwtest(teste_modelo3) # Erros altamente correlacionados
+bptest(teste_modelo3) # Heterocedasticidade
+shapiro.test(residuals(teste_modelo3)) # Os resíduos não são normalmente distribuídos
+vif(teste_modelo3) # Sem indícios de Multicolinearidade
+outlierTest(teste_modelo3)
+influencePlot(teste_modelo3)
+
+adf.test(teste_modelo3$residuals)
+# Augmented Dickey-Fuller Test
+
+# data:  teste_modelo3$residuals
+# Dickey-Fuller = -3.0358, Lag order = 4, p-value = 0.1531
+# alternative hypothesis: stationary
+
+par(mfrow = c(2, 1))
+hist(residuals(teste_modelo3), main = "Histograma dos Resíduos")
+qqnorm(residuals(teste_modelo3)); qqline(residuals(teste_modelo3))
+par(mfrow = c(1, 1))
+
+# Gráfico do TOC MKF 80
+ggplot(data = mkf6) +
+  geom_point(mapping = aes(x = Data, y = TOC_80), colour = "green2", size = 3)+
+  geom_smooth(mapping = aes(x = Data, y = TOC_80)) +
+  geom_text(mapping = aes(x = Data, y = TOC_80, label = TOC_80), vjust = -0.99, size = 3) +
+  geom_hline(yintercept = 400, linetype = "dashed", color = "gray2", size = 1, alpha = 1/3) +
+  annotate("text", x = max(mkf6$Data), y = 400, label = "TOC < 400 ppb", color = "green4", 
+           size = 4, hjust = 8, vjust = -0.5) +
+  labs(title = " Figura 1: TOC - Total Organic Carbon (ppb)") +
+  theme(plot.title = element_text(hjust = 0.5))
+# Foi adicionada " alpha = 1/" para reduzir a sobrecarga visual/gráfica
+
+# Gráfico do Cobre MKF80
+ggplot(data = mkf6) +
+  geom_point(mapping = aes(x = Data, y = Cu_MKF80), colour = "orange", size = 3)+
+  geom_smooth(mapping = aes(x = Data, y = Cu_MKF80)) +
+  geom_text(mapping = aes(x = Data, y = Cu_MKF80, label = Cu_MKF80), vjust = -0.99, size = 3) +
+  geom_hline(yintercept = 10, linetype = "dashed", color = "red", size = 1, alpha = 1/4) +
+  annotate("text", x = max(mkf6$Data), y = 10, label = "Cu < 10 ppb", color = "red", size = 4,
+           hjust = 8, vjust = -0.5) +
+  labs(title = 
+         " Figura 4: Concentração de Cobre suspenso no Tanque de àgua Primária - MKF80BB001(ppb)") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Gráfico do O2 no MKF80
+ggplot(data = mkf6) +
+  geom_point(mapping = aes(x = Data, y = O2_80), colour = "red", size = 3)+
+  geom_smooth(mapping = aes(x = Data, y = O2_80)) +
+  geom_text(mapping = aes(x = Data, y = O2_80, label = O2_80), vjust = -0.99, size = 3) +
+  geom_hline(yintercept = 20, linetype = "dashed", color = "gray1", size = 1, alpha = 1/3) +
+  geom_hline(yintercept = 5, linetype = "dashed", color = "gray1", size = 1, alpha = 1/3) +
+  annotate("text", x = max(mkf6$Data), y = 5, label = "O2 > 5 ppb", color = "brown1",
+           size = 4, hjust = 8.9, vjust = -0.5) +
+  annotate("text", x = max(mkf6$Data), y = 20, label = "O2 < 20 ppb", color = "brown1",
+           size = 4, hjust = 8, vjust = -0.5) +
+  labs(title = " Figura 5: Oxigênio em linha (ppb)") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+#   ☢️ Criando o Modelo GMM (quarto modelo com "lag":
+# 👉 As funções de momento especificam as condições d ortogonalidade (instrumentos × resíduos). 
+# Para um modelo linear:
+#                         Cut = β0 + β1TOCt + β2O2t + ϵt
+
+mkf7 <- mkf6 %>%
+  mutate(
+    TOC_lag2 = lag(TOC_80, 2),
+    O_2_lag7 = lag(O2_80, 7),
+    Cu_lag2 = lag(Cu_MKF80, 2),
+    TOC_MA6 = zoo::rollmean(TOC_80, 6, fill = NA),  # Média móvel
+  ) %>% 
+  na.omit()  # Remove linhas com NA (geradas pelas defasagens)
+print(mkf7)
+
+# Converter tibble para matriz (necessário para a função gmm)
+dados_mat <- mkf7 %>% 
+  drop_na()
+
+dados_mat2 <- as.matrix(dados_mat)
+# Error in theta[2] * TOC : argumento não-numérico para operador binário
+
+
+# Função de Momento: resíduos x instrumentos
+momentos <- function(theta, x) {
+  Cu_MKF80 <- x[, "Cu_MKF80"]
+  TOC_80 <- x[, "TOC_80"]
+  O2_80 <- x[, "O2_80"]
+  TOC_lag2 <- x[, "TOC_lag2"]
+  O_2_lag7 <- x[, "O_2_lag7"]
+  Cu_lag2 <- x[, "Cu_lag2"]
+  TOC_MA6 <- x[, "TOC_MA6"]
+  
+  erro <- Cu_MKF80 - (theta[1] + theta[2] * TOC_80 + theta[3] * O2_80 + theta[4] * Cu_lag2) 
+  
+  # Condições de momento: E[erro * instrumentos] = 0
+  return(cbind(
+    erro,
+    erro*x[,3],  # TOC_lag1
+    erro*x[,4],  # O2_lag1
+    erro*x[,5],  # TOC_lag2
+    erro*x[,6],  # O2_lag2
+    erro*x[,7],  # TOC_lag3
+    erro*x[,8]   # Média móvel TOC
+  ))
+}
+
+# Estimação GMM (two-step é mais eficiente)
+modelo_gmm2 <- gmm(
+  g = momentos,
+  x = dados_mat,
+  t0 = c(1.1, 1.1, 1.3, 1.1),         # Valores iniciais para beta0, beta1, beta2
+  type = "twoStep",        # Estimação em dois estágios
+  kernel = "Bartlett",     # Kernel para HAC
+  bw = bwNeweyWest    # Função que calcula automaticamente
+)
+# Resumo dos resultados
+summary(modelo_gmm2) # p-value = 0.97223
+
+# Cut= 4.88+0.0198(TOC)  -0.296(O_2 )+0.261(〖Cu〗_(t-1))
+
+#     🔅 Comportamento dos resíduos:
+# Calcule os resíduos manualmente
+residuos <- dados_mat[,"Cu_MKF80"] - 
+  (coef(modelo_gmm2)[1] + 
+     coef(modelo_gmm2)[2] * dados_mat[,"TOC_80"] + 
+     coef(modelo_gmm2)[3] * dados_mat[,"O2_80"] +
+     coef(modelo_gmm2)[4] * dados_mat[,"Cu_lag2"])
+
+Box.test(residuos, lag = 10, type = "Ljung-Box") # p-value = 0.3605
+
+teste.df <- adf.test(residuos$Cu_MKF80)# H0: Os resíduos não são estacionários (p. raiz unit.)
+print(teste.df)                        # H1: Os resíduos são estacionários
+
+#     🎯 Significado para Seu Modelo GMM:
+#   ÓTIMAS NOTÍCIAS:
+# ✅ Resíduos Estacionários: Seus resíduos não possuem tendência ou padrão temporal
+# ✅ Modelo Bem Especificado: O modelo capturou adequadamente as relações entre as variáveis
+# ✅ Não há Autocorrelação: Os resíduos não apresentam correlação serial problemática
+# ✅ Variáveis Cointegradas: Se as variáveis originais eram não-estacionárias, e
+#    las estão cointegradas
+
+#    📈 Implicações Práticas:
+# -> O modelo GMM está bem especificado
+# -> As estimativas dos parâmetros são confiáveis
+# -> Os instrumentos escolhidos são apropriados
+# -> O modelo pode ser usado para previsões e inferência
+
+#    🔍 Detalhe Técnico:
+#  O valor de -4.93 está bem abaixo dos valores críticos de Dickey-Fuller 
+#  (que são em torno de -2.89 para 5% de significância), confirmando a forte rejeição de H₀.
+
+par(mfrow = c(1, 2))
+acf(residuos, main = "FAC dos Residuos", lag.max = 10)  # FAC = Função de Autocorrelação
+pacf(residuos, main = "FACP dos Residuos", lag.max = 10)  # FACP = Função de Autocorrelação Parcial
+par(mfrow = c(1, 1))
+
+# Gráfico ACF dos resíduos
+par(mfrow = c(1, 2))
+acf(residuos, main = "Autocorrelação dos Resíduos", lag.max = 10)
+pacf(residuos, main = "Autocorrelação Parcial dos Resíduos", lag.max = 10)
+par(mfrow = c(1, 1))
+# 1. Criar dataframe com resíduos e variáveis
+test_df <- tibble(
+  residuos = residuos,
+  TOC_80 = dados_mat[,"TOC_80"],
+  O2_80 = dados_mat[,"O2_80"],
+  Cu_lag2 = dados_mat[,"Cu_lag2"],
+  fitted = 
+    coef(modelo_gmm2)[1] +
+    coef(modelo_gmm2)[2] * dados_mat[,"TOC_80"] + 
+    coef(modelo_gmm2)[3] * dados_mat[,"O2_80"] +
+    coef(modelo_gmm2)[4] * dados_mat[,"Cu_lag2"]
+)
+
+# 2. Teste BP modificado
+bp_test <- bptest(residuos$Cu_MKF80 ~ TOC_80$TOC_80 + O2_80$O2_80 + Cu_lag2$Cu_lag2 +
+                    I(TOC_80$TOC_80^2) + I(O2_80$O2_80^2) + (Cu_lag2$Cu_lag2^2) + 
+                    fitted$TOC, data = test_df)
+print(bp_test)
+# p-value = 0.0828 (> 0.05) → Não Rejeita-se a hipótese nula de homocedasticidade
+
+# Shapiro test
+class(residuos)  # Deve retornar "numeric" ou "matrix"
+str(residuos)    # Mostra a estrutura do objeto
+print(residuos)
+
+# Forçar conversão para numérico. Se for matriz (com 1 coluna), extraia os valores
+residuos <- as.numeric(residuos[, 1])
+
+
+# Teste de normalidade
+shapiro_result <- shapiro.test(residuos)
+print(shapiro_result)
+
+# Gráficos dos resíduos combinados
+library(patchwork)
+# Gráfico de dispersão CORRETO para resíduos vs valores ajustados
+p1 <- ggplot(test_df, aes(x = fitted$TOC_80, y = residuos$Cu_MKF80)) +
+  geom_point(size = 2.5) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "blue") +
+  labs(x = "Valores ajustados", y = "Resíduos") +
+  theme_minimal()
+
+# Gráfico de resíduos vs valores ajustados (corrigido)
+p2 <- ggplot(test_df, aes(x = fitted$TOC_80, y = residuos$Cu_MKF80)) +
+  geom_point(size = 2.5, alpha = 0.6, color = "yellow4") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "#D55E00") +
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  labs(
+    title = "Resíduos vs Valores Ajustados",
+    x = "Valores Previstos (Fitted)",
+    y = "Resíduos"
+  ) +
+  theme_minimal()
+
+# Histograma CORRETO dos resíduos
+p3 <- ggplot(test_df, aes(x = residuos$Cu_MKF80)) +
+  geom_histogram(
+    aes(y = after_stat(density)),  # Eixo y em densidade
+    bins = 10,                     # Número de barras
+    fill = "yellow",              # Preenchimento azul
+    color = "black",                 # Contorno vermelho
+    linewidth = 0.5                 # Espessura da linha
+  ) +
+  geom_density(color = "blue", linewidth = 1) +  # Linha de densidade
+  labs(
+    title = "Distribuição dos Resíduos com Contorno Vermelho",
+    x = "Resíduos",
+    y = "Densidade"
+  ) +
+  theme_minimal()
+
+# QQ-Plot
+p4 <- ggplot(test_df, aes(sample = residuos$Cu_MKF80)) +
+  stat_qq(size = 2.5,color = "yellow4") +
+  stat_qq_line(color = "blue") +
+  labs(title = "QQ-Plot dos Resíduos")
+
+# 2. Combinar os gráficos CORRETAMENTE
+combined_plot <- p1 + p2 + p3 + p4 # Usando o operador + do patchwork
+
+# 3. Visualizar o resultado
+combined_plot + 
+  plot_layout(ncol = 2)  # Organiza em 2 colunas
+
+# 🧿  Conclusão:
+# O modelo não apresenta dependência temporal tanto por meio do teste estatístico como por meio
+# dos gráficos das funções de Autocorrelação e Autocorrelação Parcial. Para o teste de verific.
+# de Heterocedasticidade (bp-test), o modelo mostrou ser levemente homocedástico. Esta 
+# evidência se mostra no gráfico: Resíduos vs Valores Ajustados, 
+
+
+# Criar um dataframe com os valores atuais (exemplo: última observação)
+dados_simulacao <- mkf7 %>%
+  select(TOC_80, O2_80, Cu_lag2) %>%
+  tail(1) %>%  # Pega a última linha disponível
+  mutate(
+    O2_80_dobrado = O2_80 * 2  # Dobra o valor de O2
+  )
+
+# Visualizar
+print(dados_simulacao)
+
+# Coeficientes do modelo (do seu output)
+theta <- c(
+  Theta1 = 4.8837,   # Intercepto
+  Theta2 = 0.019764,  # Coeficiente de TOC_80
+  Theta3 = -0.29578,  # Coeficiente de O2_80
+  Theta4 = 0.26096    # Coeficiente de Cu_lag
+)
+
+# Calcular o cobre predito:
+dados_simulacao <- dados_simulacao %>%
+  mutate(
+    # Cenário ATUAL (O2 original)
+    Cu_predito_atual = theta[1] + theta[2] * TOC_80 + theta[3] * O2_80 + theta[4] * Cu_lag2,
+    
+    # Cenário COM O2 DOBRADO
+    Cu_predito_dobrado = theta[1] + theta[2]*TOC_80 + theta[3]*(O2_80 * 2) + theta[4]*Cu_lag2,
+    
+    # Diferença absoluta e percentual
+    diferenca_abs = Cu_predito_dobrado - Cu_predito_atual,
+    diferenca_perc = (diferenca_abs / Cu_predito_atual) * 100
+  )
+
+# Resultados
+print(dados_simulacao %>% select(Cu_predito_atual, Cu_predito_dobrado, diferenca_abs, diferenca_perc))
+
+
+# Criar sequência de valores de O2 (de 0 a 40 ppm)
+df_sensibilidade <- data.frame(
+  O2_80 = seq(0, 50, by = 1),
+  TOC_80 = mean(mkf7$TOC_80, na.rm = TRUE),  # Valor médio de TOC
+  Cu_lag2 = mean(mkf7$Cu_lag2, na.rm = TRUE)   # Valor médio de Cu_lag
+) %>%
+  mutate(
+    Cu_predito = theta[1] + theta[2] * TOC_80 + theta[3] * O2_80 + theta[4] * Cu_lag2
+  )
+
+# Plotar
+ggplot(df_sensibilidade, aes(x = O2_80, y = Cu_predito)) +
+  geom_line(color = "blue", linewidth = 1) +
+  geom_vline(xintercept = c(15, 40), linetype = "dashed", color = "red") +
+  annotate("text", x = 15, y = max(df_sensibilidade$Cu_predito), 
+           label = "O₂ atual (15 ppm)", hjust = -0.1, color = "red") +
+  annotate("text", x = 40, y = max(df_sensibilidade$Cu_predito), 
+           label = "O₂ dobrado (40 ppm)", hjust = -0.1, color = "red") +
+  labs(
+    title = "Efeito do O₂ na Concentração de Cobre Predita",
+    x = "Oxigênio Dissolvido (O₂, ppm)",
+    y = "Cobre Predito (Cu_MKF80, ppb)"
+  ) +
+  theme_minimal()
+
+# Adicionar O2_80^2 à função de momentos
+momentos_v2 <- function(theta, x) {
+  erro <- x[,"Cu_MKF80"] - (theta[1] + theta[2]*x[,"TOC_80"] + theta[3]*x[,"O2_80"] + 
+                              theta[4]*x[,"Cu_lag2"] + theta[5]*(x[,"O2_80"]^2))
+  cbind(erro, erro*x[,"TOC_lag2"], erro*x[,"O_2_lag7"])
+}
+
+# Cenário completo:
+# Usando a última observação disponível como referência
+cenario_base <- mkf7 %>%
+  select(TOC_80, O2_80, Cu_lag2) %>%
+  tail(1)  # Pega a última linha
+
+cenario_alterado <- cenario_base %>%
+  mutate(O2_80 = O2_80 * 2)  # Dobra o O₂
+
+# Função para decompor os efeitos
+decompor_impacto <- function(dados, theta) {
+  dados %>%
+    mutate(
+      Intercepto = theta[1],
+      Contrib_TOC = theta[2] * TOC_80,
+      Contrib_O2 = theta[3] * O2_80,
+      Contrib_Cu_lag = theta[4] * Cu_lag2,
+      Cu_predito = Intercepto + Contrib_TOC + Contrib_O2 + Contrib_Cu_lag
+    )
+}
+
+# Aplicar aos cenários
+impacto_base <- decompor_impacto(cenario_base, theta)
+impacto_alterado <- decompor_impacto(cenario_alterado, theta)
+
+# Juntar os resultados
+comparacao <- bind_rows(
+  "Cenário Base" = impacto_base,
+  "Cenário O₂ Dobrado" = impacto_alterado,
+  .id = "Cenario"
+)
+
+# Calcular diferenças
+comparacao <- comparacao %>%
+  group_by(Cenario) %>%
+  mutate(
+    Impacto_Total = sum(Intercepto, Contrib_TOC, Contrib_O2, Contrib_Cu_lag)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    Diferenca_O2 = Contrib_O2 - lag(Contrib_O2),
+    Diferenca_Total = Impacto_Total - lag(Impacto_Total)
+  )
+
+# Visualizar
+print(comparacao)
+
+# Preparar dados para o gráfico
+dados_grafico <- comparacao %>%
+  pivot_longer(
+    cols = c(Intercepto, Contrib_TOC, Contrib_O2, Contrib_Cu_lag),
+    names_to = "Variavel",
+    values_to = "Contribuicao"
+  )
+
+# Gráfico de barras empilhadas
+ggplot(dados_grafico, aes(x = Cenario, y = Contribuicao, fill = Variavel)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(Contribuicao, 2)), 
+            position = position_stack(vjust = 0.5), 
+            color = "white") +
+  labs(
+    title = "Decomposição do Impacto das Variáveis no Cobre Predito",
+    x = "Cenário",
+    y = "Contribuição (ppb)",
+    fill = "Variável"
+  ) +
+  theme_minimal()
+
+cenario_alterado <- cenario_base %>%
+  mutate(
+    O2_80 = O2_80 * 2,
+    TOC_80 = TOC_80 * 1.1
+  )
+
+
+# 1. Criar dataframe com todas as variáveis necessárias
+dados_plot <- mkf7 %>%
+  select(Data, Cu_MKF80, TOC_80, O2_80) %>%
+  mutate(
+    # Criar a variável Cu_lag (lag de 1 período)
+    Cu_lag = lag(Cu_MKF80, 1),
+    
+    # Calcular as previsões para ambos os cenários
+    Cu_normal = coef(modelo_gmm2)[1] + 
+      coef(modelo_gmm2)[2] * TOC_80 + 
+      coef(modelo_gmm2)[3] * O2_80 + 
+      coef(modelo_gmm2)[4] * Cu_lag,
+    
+    Cu_O2_dobrado = coef(modelo_gmm2)[1] + 
+      coef(modelo_gmm2)[2] * TOC_80 + 
+      coef(modelo_gmm2)[3] * (O2_80 * 2) + 
+      coef(modelo_gmm2)[4] * Cu_lag
+  ) %>%
+  filter(!is.na(Cu_lag))  # Remover NA da primeira observação
+
+# 2. Gráfico comparativo CORRETO
+ggplot(dados_plot, aes(x = Data)) +
+  geom_line(aes(y = Cu_normal, color = "O₂ Normal"), linewidth = 1) +
+  geom_line(aes(y = Cu_O2_dobrado, color = "O₂ Dobrado"), linewidth = 1, linetype = "dashed") +
+  geom_point(aes(y = Cu_MKF80, color = "Observado"), size = 2) +  # Agora funciona!
+  scale_color_manual(values = c("O₂ Normal" = "blue", 
+                                "O₂ Dobrado" = "red", 
+                                "Observado" = "black")) +
+  labs(title = "Comportamento do Cobre com O₂ Normal vs. Dobrado",
+       subtitle = paste("Efeito do O₂: coeficiente =", round(coef(modelo_gmm2)[3], 4), 
+                        "| Redução esperada ao dobrar O₂ =", 
+                        round(mean(dados_plot$Cu_normal - dados_plot$Cu_O2_dobrado, na.rm = TRUE), 2), "ppb"),
+       x = "Data",
+       y = "Concentração de Cobre (ppb)",
+       color = "Cenário") +
+  theme_minimal() +
+  theme(legend.position = "bottom",  
+        plot.subtitle = element_text(size = 9))
+
+dados_plot <- dados_plot %>%
+  mutate(
+    Cu_normal_ma = zoo::rollmean(Cu_normal, 10, fill = NA),
+    Cu_O2_dobrado_ma = zoo::rollmean(Cu_O2_dobrado, 10, fill = NA)
+  )
+
+# Gráfico com médias móveis
+ggplot(dados_plot, aes(x = Data)) +
+  geom_line(aes(y = Cu_normal_ma, color = "O₂ Normal (MM5)"), linewidth = 1) +
+  geom_line(aes(y = Cu_O2_dobrado_ma, color = "O₂ Dobrado (MM5)"), linewidth = 1) +
+  labs(title = "Comportamento do Cobre (Médias Móveis de 10 dias)")  # Restante igual
+
+write.csv(dados_plot, "previsoes_cobre_o2_ajustado.csv", row.names = FALSE)
+
+# Verificar resíduos do cenário simulado
+residuos_simulados <- dados_plot$Cu_MKF80 - dados_plot$Cu_O2_dobrado
+qqnorm(residuos_simulados, main = "Gráfico Q-Q dos Resíduos Simulados")
+qqline(residuos_simulados, col = "red4", lwd = 1) # Linha de referência
+
+# Opcional: Teste de normalidade Shapiro-Wilk
+shapiro.test(residuos_simulados)
+
+
+#************************ Criando uma API para o modelo final GMM
+
+# api/plumber.R
+# Load necessary packages
+library(plumber)
+library(here)
+
+#* @apiTitle API de Previsão de Concentração de Cobre
+#* @apiDescription Esta API faz a previsão um passo à frente da concentração de Cu (Cu_t)
+#* usando o modelo: Cu_t = 4.88 + 0.0198 * TOC - 0.296 * O2 + 0.261 * Cu_{t-1}
+
+
+#* Faz uma previsão de Cu_t com base nos parâmetros de entrada.
+#* @param TOC Valor atual de TOC (Total Organic Carbon)
+#* @param O2 Valor atual de Oxigênio (O₂)
+#* @param Cu_lag1 Valor da concentração de Cobre no período anterior (Cu_{t-1})
+#* @get /predict
+#* @post /predict
+
+## Converta as entradas para numéricas (elas vêm da URL como caracteres)
+cobre <- function(TOC, O2, Cu_lag1) {
+  TOC <- as.numeric(TOC)
+  O2 <- as.numeric(O2)
+  Cu_lag1 <- as.numeric(Cu_lag1)
+  
+  # Model coefficients (hardcoded from your equation)
+  intercept <- 4.88
+  coef_toc <- 0.0198
+  coef_o2 <- -0.296
+  coef_cu_lag <- 0.261
+  
+  # Model coefficients (hardcoded from your equation)
+  prediction <- intercept + coef_toc*TOC + coef_o2*O2 + coef_cu_lag*Cu_lag1
+  
+  # Return the result as a list (which Plumber serializes to JSON automatically)
+  return(list(predicted_Cut = prediction,
+              inputs = list(TOC = TOC, O2 = O2, Cu_lag1 = Cu_lag1),
+              equation = "Cu_t = 4.88 + 0.0198*TOC - 0.296*O2 + 0.261*Cu{t-1}"))
+  
+}
+
+cobre(500, 35, 8)
+
+# plumber.R
+library(plumber)
+
+# Carrega sua função (se estiver em arquivo separado)
+# source("minha_funcao_modelo.R")
+
+#* @apiTitle API de Previsão de Cobre
+#* @apiDescription API para prever concentração de Cu usando o modelo: Cu_t = 4.88 + 0.0198*TOC - 0.296*O2 + 0.261*Cu_{t-1}
+
+#* @param TOC Total Organic Carbon
+#* @param O2 Oxigênio Dissolvido  
+#* @param Cu_lag1 Concentração de Cobre no período anterior
+#* @get /predict
+#* @post /predict
+function(TOC, O2, Cu_lag1) {
+  
+  # Converte os parâmetros para numérico
+  TOC <- as.numeric(TOC)
+  O2 <- as.numeric(O2)
+  Cu_lag1 <- as.numeric(Cu_lag1)
+  
+  # Aplica a função do modelo
+  resultado <- 4.88 + (0.0198 * TOC) - (0.296 * O2) + (0.261 * Cu_lag1)
+  
+  # Retorna resposta formatada
+  list(
+    prediction = resultado,
+    parameters = list(
+      TOC = TOC,
+      O2 = O2, 
+      Cu_lag1 = Cu_lag1
+    ),
+    model = "Cu_t = 4.88 + 0.0198*TOC - 0.296*O2 + 0.261*Cu_{t-1}",
+    timestamp = Sys.time()
+  )
+}
+
+#* @get /model-info
+#* Retorna informações sobre o modelo
+function() {
+  list(
+    model_formula = "Cu_t = 4.88 + 0.0198*TOC - 0.296*O2 + 0.261*Cu_{t-1}",
+    parameters = c("TOC", "O2", "Cu_lag1"),
+    intercept = 4.88,
+    coefficients = c(TOC = 0.0198, O2 = -0.296, Cu_lag1 = 0.261)
+  )
+}
+
+# 1. Define o diretório base (ajuste se necessário)
+base_dir <- "C:/Users/acltk/OneDrive/Documentos p UFF"
+setwd(base_dir)
+
+# 2. Cria a pasta do projeto se não existir
+projeto_dir <- "meu_projeto_api"
+dir.create(projeto_dir, showWarnings = FALSE)
+setwd(projeto_dir)
+
+# 3. Cria a pasta API
+dir.create("api", showWarnings = FALSE)
+
+# 4. CRIA o arquivo plumber.R com SEU modelo
+writeLines('
+# api/plumber.R
+library(plumber)
+
+#* @apiTitle API de Previsão da Concentração de Cobre
+#* @apiDescription Esta API faz a previsão usando o modelo: Cu_t = 4.88 + 0.0198*TOC - 0.296*O2 + 0.261*Cu_{t-1}
+
+#* @get /predict
+#* @post /predict
+function(TOC, O2, Cu_lag1) {
+  # Converte os inputs para numérico
+  TOC <- as.numeric(TOC)
+  O2 <- as.numeric(O2)
+  Cu_lag1 <- as.numeric(Cu_lag1)
+  
+  # Aplica a fórmula do modelo
+  prediction <- 4.88 + (0.0198 * TOC) - (0.296 * O2) + (0.261 * Cu_lag1)
+  
+  # Retorna o resultado
+  return(list(
+    predicted_Cu_t = prediction,
+    model_used = "Cu_t = 4.88 + 0.0198*TOC - 0.296*O2 + 0.261*Cu_{t-1}",
+    inputs = list(TOC = TOC, O2 = O2, Cu_lag1 = Cu_lag1)
+  ))
+}
+
+#* @get /model-info
+function() {
+  list(
+    formula = "Cu_t = 4.88 + 0.0198*TOC - 0.296*O2 + 0.261*Cu_{t-1}",
+    coefficients = list(
+      intercept = 4.88,
+      TOC = 0.0198,
+      O2 = -0.296,
+      Cu_lag1 = 0.261
+    )
+  )
+}
+', "api/plumber.R")
+
+library(plumber)
+pr("api/plumber.R") %>% pr_run(port = 8000, host = "0.0.0.0")
+
+# http://localhost:8000/predict?TOC=500&O2=40&Cu_lag1=3.2
+
+
+#****************** Criação do Modelo VAR
+
+#  💡 O VAR busca fundamentalmente a trajetória das variáveis endógenas ante um choque estrutural.
+# Nada impede, contudo, de ser usado para previsão também.
+
+library(vars)
+library(tidyverse)
+library(tseries)
+
+# 👉 Converter para séries temporais:
+# Para seus dados COM GAPS (datas faltantes):
+# Especificar explicitamente o pacote
+mkf6_ts <- mkf6 %>%
+  dplyr::select(Cu_MKF80, O2_80, TOC_80) %>%
+  as.matrix() %>%
+  ts(start = 1, frequency = 1)
+
+# Isso significa: "trate como uma série sequencial simples"
+# Observação 1, 2, 3, ..., n (sem relação com datas do calendário)
+
+# 👉 Verificação de estacionariedade das séries
+adf.test(mkf6_ts[, "Cu_MKF80"]) # Teste de Dickey-Fuller -> s. não estac. (p-value = 0.9567)
+adf.test(mkf6_ts[, "O2_80"]) # s. não estac. (p-value = 0.245)
+adf.test(mkf6_ts[, "TOC_80"]) # s. não estac. (p-value = 0.6286)
+
+# 👉 Aplicar a primeira diferenciação:
+mkf6_diff <- diff(mkf6_ts)
+
+# 👉 Verificação novamente a estacionariedade das séries
+adf.test(mkf6_diff[, "Cu_MKF80"]) # p-value smaller than printed p-value
+adf.test(mkf6_diff[, "O2_80"]) # p-value smaller than printed p-value
+adf.test(mkf6_diff[, "TOC_80"]) # p-value = 0.04458 < 0.05 ✅
+
+# 👉  Selecionar a ordem ideal para o modelo VAR:
+var_selection <- VARselect(mkf6_diff, lag.max = 10, type = "const")
+print("Seleção de lags ótima:")
+print(var_selection)
+
+# $selection
+# AIC(n)  HQ(n)  SC(n) FPE(n) 
+#  3      2      1      3 
+
+# Para inferência/ Interpretação (mais foco na parcimônia). Assim:
+
+# 👉 Use SC/BIC (sugere 1 lag) - modelo mais simples
+var_model <- VAR(mkf6_diff, p = 2, type = "const")
+summary(var_model)
+
+# 2. Analisar função impulso-resposta
+irf_results <- irf(var_model, n.ahead = 5, cumulative = TRUE)
+plot(irf_results)
+
+# 3. Decomposição da variância
+fevd_results <- fevd(var_model, n.ahead = 5)
+plot(fevd_results)
+
+# 4. Testar se precisa remover variáveis não significativas
+var_model_simplified <- restrict(var_model, method = "ser", thresh = 1.0)
+summary(var_model_simplified)
+irf_results2 <- irf(var_model_simplified, n.ahead = 10, cumulative = TRUE)
+plot(irf_results2)
+
+# Estimation results for equation Cu_MKF80: 
+#  ========================================= 
+#  Cu_MKF80 = Cu_MKF80.l1 + O2_80.l1 + TOC_80.l1 + O2_80.l2 
+
+# Estimate Std. Error t value Pr(>|t|)    
+# Cu_MKF80.l1 -0.529031   0.113755  -4.651 1.61e-05 ***
+#  O2_80.l1    -0.161505   0.087954  -1.836 0.070757 .  
+# TOC_80.l1    0.024459   0.006538   3.741 0.000383 ***
+#  O2_80.l2    -0.148814   0.087745  -1.696 0.094533 .  
+# ---
+#  Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+# Residual standard error: 6.93 on 67 degrees of freedom
+# Multiple R-Squared: 0.297,	Adjusted R-squared: 0.255 
+# F-statistic: 7.075 on 4 and 67 DF,  p-value: 8.186e-05 
+
+# Plot personalizado apenas para as relações do Cobre
+# Criar o layout PRIMEIRO
+# Calcular IRFs individuais
+
+# Calcular IRFs individuais
+irf_o2_to_cu <- irf(var_model, impulse = "O2_80", response = "Cu_MKF80", 
+                    n.ahead = 6, cumulative = TRUE)
+
+irf_toc_to_cu <- irf(var_model, impulse = "TOC_80", response = "Cu_MKF80",
+                     n.ahead = 6, cumulative = TRUE)
+
+# Agora plotar com layout
+par(mfrow = c(2, 1))
+
+plot(irf_o2_to_cu, main = "Impacto do Oxigênio no Cobre")
+plot(irf_toc_to_cu, main = "Impacto do TOC no Cobre")
+
+par(mfrow = c(1, 1))
+
+library(ggplot2)
+library(patchwork)
+
+# Função para converter irf em dataframe
+irf_to_df <- function(irf_obj, impulse_name) {
+  n_ahead <- length(irf_obj$irf[[1]]) - 1
+  data.frame(
+    horizon = 0:n_ahead,
+    effect = as.numeric(irf_obj$irf[[1]]),
+    lower = as.numeric(irf_obj$Lower[[1]]),
+    upper = as.numeric(irf_obj$Upper[[1]]),
+    impulse = impulse_name
+  )
+}
+
+# Converter os objetos irf
+df_o2 <- irf_to_df(irf_o2_to_cu, "Oxigênio")
+df_toc <- irf_to_df(irf_toc_to_cu, "TOC")
+
+# Criar gráficos ggplot
+p1 <- ggplot(df_o2, aes(x = horizon, y = effect)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.3, fill = "blue") +
+  geom_line(color = "darkblue", size = 1) +
+  labs(title = "Impacto do Oxigênio no Cobre",
+       x = "Horizonte temporal", y = "Efeito no Cobre") +
+  theme_minimal()
+
+p2 <- ggplot(df_toc, aes(x = horizon, y = effect)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.3, fill = "red") +
+  geom_line(color = "darkred", size = 1) +
+  labs(title = "Impacto do TOC no Cobre",
+       x = "Horizonte temporal", y = "Efeito no Cobre") +
+  theme_minimal()
+
+# Combinar com patchwork
+p1 / p2  # Um sobre o outro
+
+mkf7 <- tibble(
+  Data = as.Date(c(
+    "08/01/25", "09/01/25", "10/01/25", "13/01/25", "14/01/25", "15/01/25", "16/01/25", 
+    "17/01/25", "21/01/25", "29/01/25", "31/01/25", "31/01/25", "03/02/25", "04/02/25", 
+    "04/02/25", "05/02/25", "05/02/25", "06/02/25", "06/02/25", "07/02/25", "07/02/25", 
+    "10/02/25", "10/02/25", "11/02/25", "11/02/25", "12/02/25", "12/02/25", "13/02/25",
+    "13/02/25", "14/02/25", "14/02/25", "17/02/25", "17/02/25", "18/02/25", "18/02/25",
+    "19/02/25", "19/02/25", "20/02/25", "20/02/25", "21/02/25", "21/02/25", "25/02/25",
+    "27/02/25", "06/03/25", "11/03/25", "12/03/25", "12/03/25", "13/03/25",  
+    "14/03/25", "15/03/25", "16/03/25", "17/03/25", "18/03/25", "19/03/25", "19/03/25", "21/03/25", 
+    "24/03/25", "25/03/25", "26/03/25", "27/03/25", "28/03/25", "29/03/25", "29/03/25", '29/03/25',
+    "30/03/25", "30/03/25", "31/03/25", "01/04/25", "01/04/25", "02/04/25", "02/04/25", '04/04/25',
+    '04/04/25', "05/04/25", "05/04/25", "05/04/25", "06/04/25", "06/04/25", "06/04/25", "07/04/25",
+    '07/04/25', "10/04/25", "12/04/25", "13/04/25", "14/04/25", "16/04/25", "17/04/25", "22/04/25",
+    "24/04/25", "25/04/25", "29/04/25", "01/05/25", "09/05/25", "12/05/25", "14/05/25", 
+    "19/05/25", "22/05/25", "24/05/25", "26/05/25", "29/05/25", "02/06/25", "02/06/25",
+    "03/06/25", "06/06/25", "07/06/25", "09/06/25", '11/06/25', "12/06/25", "14/06/25",
+    "15/06/25", "16/06/25", "17/06/25", "17/06/25", "18/06/25", "18/06/25", "19/06/25", 
+    "20/06/25", "21/06/25", "22/06/25", "22/06/25"), format = "%d/%m/%y"), 
+  
+  Cu_MKF80 = c(
+    55.2, 69.6, 72.2, 87.3, 75.7, 79.8, 73.8, 80.2, 88.2, 95.0, 86.2, 86.2, 51.6, 69.9, 
+    65.1, 71.5, 63.2, 60.6, 54.3, 37.6, 33.1, 48.3, 30.8, 41.4, 36.4, 25.2, 23.2, 21.0, 
+    22.9, 16.4, 17.4, 17.3, 17.9, 15.7, 17.6, 13.1, 16.4, 19.5, 16.5, 14.8, 15.2, 3.20, 
+    2.00, 3.0, 7.5, 3.3, 3.7, 3.5, 4.4, 3.9, 4.7, 3.0, 4.2, 4.6, 6.5, 9.7, 10.2, 11.9, 
+    13.6, 2.0, 2.0, 2.1, 2.1, 2.2, 2.2, 2.2, 2.2, 2.2, 1.7, 1.7, 2.0, 3.0, 3.0, 3.0, 4.0, 4.0, 4.0,
+    5.0, 5.0, 5.6, 9.1, 14.7, 15.8, 18.7, 4.7, 5.5, 7.3, 9.3, 10.5, 10.5, 17.5, 2.40, 7.00, 10.4, 24.8, 23.1, 22.9, 14.3, 16.9, 23.3, 16.1, 14.7, 
+    13.9, 13.4, 12.5, 13.2, 17.8, 15.3, 8.50, 10.8, 10.8, 11.2, 11.3, 11.0, 11.1, 10.9, 
+    12.4, 14.2, 16.3, 16.3), 
+  
+  O2_80 = c(
+    7.90, 8.30, 6.90, 9.00, 11.5, 10.5, 10.8, 9.20, 7.50, 7.00, 13.3, 13.0, 9.60, 8.30, 
+    10.7, 8.30, 9.90, 7.60, 11.4, 6.30, 7.90, 6.70, 10.3, 9.00, 10.7, 9.30, 13.3, 9.00,
+    10.1, 9.00, 10.9, 6.70, 11.0, 6.50, 8.80, 7.60, 21.2, 6.40, 19.9, 6.40, 14.2, 70.6,
+    3.50, 5.8, 6.0, 35.4, 15.4, 16.3, 20.3, 26.5, 31.2, 26.9, 34.5, 16.3, 22.5, 24.7, 
+    16.6, 18.1, 17.5, 58.0, 48.5, 41.2, 31.0, 29.3, 26.6, 17.0, 14.4, 13.8, 13.4, 11.6, 21.5, 20.9,
+    17.8, 16.4, 18.2, 18.8, 19.7, 20.7, 22.8, 24.3, 18.0, 15.9, 21.3, 18.3, 38.0, 21.6, 15.2, 17.6,
+    17.5, 19.6, 15.6, 18.8, 15.6, 16.2, 16.5, 17.9, 15.0, 25.4, 19.0, 16.8, 20.0, 25.9,
+    22.0, 24.7, 9.60, 17.5, 18.5, 20.4, 17.1, 17.7, 18.2, 17.6, 23.6, 18.2, 19.5, 18.8,
+    15.4, 16.5, 17.9, 17.3),
+  
+  TOC_80 = c(
+    4772, 4153, 4124, 4151, 3897, 3879, 3845, 3886, 3611, 3483, 3283, 2699, 2310, 2316,
+    2316, 2168, 1816, 1826, 1455, 1474, 1279, 1281, 1064, 1051, 805, 864, 672, 694,
+    611, 428, 566, 633, 543, 559, 502, 507, 449, 485, 428, 465, 409, 392, NA, NA, NA, NA, NA, 
+    NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA ,NA , NA, NA, NA,
+    410, 586, 624, 537, 520, 543, 575, 569, 613, 549, 567, 550, 513, 487,
+    427, 289, 322, 312, 409, 414, 327, 332, 325, 378, 338, 360, 324, 329,
+    350, 374, 386, 412))
+print(mkf7)
+
+mkf10 <- tibble(
+  Data = as.Date(c(
+    "25/02/25",
+    "27/02/25", "06/03/25", "11/03/25", "12/03/25", "12/03/25", "13/03/25",  
+    "14/03/25", "15/03/25", "16/03/25", "17/03/25", "18/03/25", "19/03/25", "19/03/25", "21/03/25", 
+    "24/03/25", "25/03/25", "26/03/25", "27/03/25", "28/03/25", "29/03/25", "29/03/25", '29/03/25',
+    "30/03/25", "30/03/25", "31/03/25", "01/04/25", "01/04/25", "02/04/25", "02/04/25", '04/04/25',
+    '04/04/25', "05/04/25", "05/04/25", "05/04/25", "06/04/25", "06/04/25", "06/04/25", "07/04/25",
+    '07/04/25', "10/04/25", "12/04/25", "13/04/25", "14/04/25", "16/04/25"
+    ), format = "%d/%m/%y"), 
+  
+  Cu_MKF80 = c(
+     
+    3.20, 2.00, 3.0, 7.5, 3.3, 3.7, 3.5, 4.4, 3.9, 4.7, 3.0, 4.2, 4.6, 6.5, 9.7, 10.2, 11.9, 
+    13.6, 2.0, 2.0, 2.1, 2.1, 2.2, 2.2, 2.2, 2.2, 2.2, 1.7, 1.7, 2.0, 3.0, 3.0, 3.0, 4.0, 4.0, 4.0,
+    5.0, 5.0, 5.6, 9.1, 14.7, 15.8, 18.7, 4.7, 5.5 
+   ), 
+  
+  O2_80 = c(
+    70.6, 3.50, 5.8, 6.0, 35.4, 15.4, 16.3, 20.3, 26.5, 31.2, 26.9, 34.5, 16.3, 22.5, 24.7, 
+    16.6, 18.1, 17.5, 58.0, 48.5, 41.2, 31.0, 29.3, 26.6, 17.0, 14.4, 13.8, 13.4, 11.6, 21.5, 20.9,
+    17.8, 16.4, 18.2, 18.8, 19.7, 20.7, 22.8, 24.3, 18.0, 15.9, 21.3, 18.3, 38.0, 21.6
+    
+    ),
+  
+  TOC_80 = c(
+    392, NA, NA, NA, NA, NA, 
+    NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA ,NA , NA
+    ))
+print(mkf10)
+
+summary(mkf10$O2_80)
+summary(mkf6$O2_80)
+summary(mkf7$O2_80)
+
+mkf_O2 <- tibble(
+   O2_80 = c(
+    26.6, 17.0, 14.4, 13.8, 13.4, 11.6, 21.5, 20.9,
+    17.8, 16.4, 18.2, 18.8, 19.7, 20.7, 22.8, 24.3, 18.0, 15.9, 21.3, 18.3, 38.0, 21.6, 15.2, 17.6,
+    17.5, 19.6, 15.6, 18.8, 15.6, 16.2, 16.5, 17.9, 15.0, 25.4, 19.0, 16.8, 20.0, 25.9,
+    22.0, 24.7, 9.60, 17.5, 18.5, 20.4, 17.1, 17.7, 18.2, 17.6, 23.6, 18.2, 19.5, 18.8,
+    15.4, 16.5, 17.9, 17.3))
+summary(mkf_O2) 
+summary(mkf10$O2_80)
+1 - (18.10/20.3)
+   
